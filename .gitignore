@@ -9,6 +9,7 @@ build/
 bin/
 dist/
 *.spec
+build.bat
 
 ffmpeg.exe
 settings.txt

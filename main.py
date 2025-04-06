@@ -2,7 +2,6 @@ import sys
 import cv2
 import subprocess
 import os.path
-# import ffmpeg
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QLabel, QSlider, QFileDialog
 )
@@ -17,9 +16,6 @@ SETTINGS = {
     'TEMP_DIR': '.\\temp',
     'FILE_SIZE': 10
 }
-# OUTPUT_DIR = '.\\output'
-# TEMP_DIR = '.\\temp'
-# FILE_SIZE = 10  # mb
 
 # non configurable constants
 FFMPEG = 'ffmpeg.exe'
@@ -29,7 +25,9 @@ MIN_LENGTH = 3  # seconds
 class VideoTrimmer(QWidget):
     def __init__(self):
         super().__init__()
+        self.original_path = None
         self.video_path = None
+        self.audio_path = None
         self.cap = None
         self.frame_count = 0
         self.fps = 30
@@ -58,8 +56,11 @@ class VideoTrimmer(QWidget):
         self.video_widget = QVideoWidget(self)
         self.player = QMediaPlayer(self)
         self.player.setVideoOutput(self.video_widget)
+
         self.audio_output = QAudioOutput(self)
-        self.player.setAudioOutput(self.audio_output)
+        self.audio_player = QMediaPlayer(self)
+        self.audio_player.setAudioOutput(self.audio_output)
+        # self.player.setAudioOutput(self.audio_output)
 
         # progress slider
         self.progress_slider = QSlider(Qt.Orientation.Horizontal, self)
@@ -121,14 +122,16 @@ class VideoTrimmer(QWidget):
                     "-filter_complex", "[0:a:0][0:a:1]amerge=inputs=2[a]",
                     # "-map", "[a]",
                     # "-c:a", "aac", "-b:a", "192k",
-                    "-map", "0:v", "-map", "[a]",
+                    # "-map", "0:v",
+                    "-map", "[a]",
                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
                     output_path, "-y"
                 ]
                 # subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 subprocess.run(command)
-            # self.video_path = self.original_path
-            self.video_path = output_path
+            self.video_path = self.original_path
+            self.audio_path = output_path
+            # self.video_path = output_path
             # print(self.video_path)
 
             self.cap = cv2.VideoCapture(self.video_path)
@@ -148,9 +151,20 @@ class VideoTrimmer(QWidget):
             # setup video player
             self.player.positionChanged.connect(self.on_playback_change)
             self.player.setSource(QUrl.fromLocalFile(self.video_path))
-            self.player.play()
+            self.audio_player.setSource(QUrl.fromLocalFile(self.audio_path))
+            self.play()
 
-            # print(self.player.mediaObject())
+    def pause(self):
+        self.audio_player.pause()
+        self.player.pause()
+
+    def play(self):
+        self.audio_player.play()
+        self.player.play()
+
+    def setPosition(self, value):
+        self.audio_player.setPosition(value)
+        self.player.setPosition(value)
 
     def on_playback_change(self, value, isReal=True):
         # self.start_label.setText(f"Start Time: {value} sec")
@@ -158,7 +172,7 @@ class VideoTrimmer(QWidget):
         if isReal:
             if value > self.end_slider.value() * 1000:
                 value = self.start_slider.value() * 1000
-                self.player.setPosition(value)
+                self.setPosition(value)
 
             self.progress_slider.setValue(value)
 
@@ -166,18 +180,18 @@ class VideoTrimmer(QWidget):
         # self.start_label.setText(f"Start Time: {value} sec")
 
         if isReal:
-            self.player.setPosition(value)
-            self.player.pause()
+            self.setPosition(value)
+            self.pause()
 
     def stop_update_progress(self, isReal=True):
-        self.player.play()
+        self.play()
 
     def update_start_time(self, value, isReal=True):
         self.start_label.setText(f"Start Time: {value} sec")
         self.progress_slider.setMinimum(value * 1000)
 
         if isReal:
-            self.player.setPosition(value * 1000)
+            self.setPosition(value * 1000)
             if value + MIN_LENGTH > self.end_slider.value():
                 self.end_slider.setValue(value + MIN_LENGTH)
                 self.update_end_time(self.end_slider.value(), False)
@@ -187,7 +201,7 @@ class VideoTrimmer(QWidget):
         self.progress_slider.setMaximum(value * 1000)
 
         if isReal:
-            self.player.setPosition(int((value - 1.2) * 1000))
+            self.setPosition(int((value - 1.2) * 1000))
             if value - MIN_LENGTH < self.start_slider.value():
                 self.start_slider.setValue(value - MIN_LENGTH)
                 self.update_start_time(self.start_slider.value(), False)
@@ -210,19 +224,22 @@ class VideoTrimmer(QWidget):
         bitrate = (SETTINGS.get('FILE_SIZE') * 0.87 * 1024 * 1024 * 8) // duration
         # print(bitrate)
 
-        self.player.pause()
+        self.pause()
 
         command = [
             FFMPEG, "-y",
-            "-i", self.video_path,
+            "-i", self.original_path,
             "-ss", str(start_time), "-to", str(end_time),
+            "-filter_complex", "[0:a:0][0:a:1]amerge=inputs=2[a]",
+            "-ac", "2",
+            "-map", "[a]",
+            "-map", "0:v:0",
             "-b:v", str(bitrate),
-            # "-c", "copy", output_path
             "-c:v", "libx264", output_path
         ]
         subprocess.run(command)
 
-        self.player.play()
+        self.play()
 
 if __name__ == "__main__":
     # verify required folders and files exist
