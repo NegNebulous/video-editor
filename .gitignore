@@ -1,3 +1,15 @@
 input/
 output/
 temp/
+
+dev/
+todo
+
+build/
+bin/
+dist/
+*.spec
+
+ffmpeg.exe
+settings.txt
+

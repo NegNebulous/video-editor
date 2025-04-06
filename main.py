@@ -10,11 +10,21 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtCore import Qt, QTimer, QUrl
 
-output_dir =    'C:\\svoo\\stuff\\Code\\_projects\\video_editor\\output'
-temp_dir =      'C:\\svoo\\stuff\\Code\\_projects\\video_editor\\temp'
+# constants
+SETTINGS = {
+    'INPUT_DIR': '.\\input',
+    'OUTPUT_DIR': '.\\output',
+    'TEMP_DIR': '.\\temp',
+    'FILE_SIZE': 10
+}
+# OUTPUT_DIR = '.\\output'
+# TEMP_DIR = '.\\temp'
+# FILE_SIZE = 10  # mb
 
+# non configurable constants
+FFMPEG = 'ffmpeg.exe'
+SETTINGS_DIR = '.\\settings.txt'
 MIN_LENGTH = 3  # seconds
-FILE_SIZE = 10  # mb
 
 class VideoTrimmer(QWidget):
     def __init__(self):
@@ -91,16 +101,15 @@ class VideoTrimmer(QWidget):
 
     def load_video(self):
         file_dialog = QFileDialog()
-        self.video_path, _ = file_dialog.getOpenFileName(self, "Select Video", "", "Videos (*.mp4 *.avi *.mov)")
+        self.video_path, _ = file_dialog.getOpenFileName(self, "Select Video", SETTINGS.get('INPUT_DIR'), "Videos (*.mp4 *.avi *.mov)")
         self.original_path = self.video_path
 
         if self.video_path:
-            vf_name = self.video_path \
-                .split('\\')[-1] \
-                .split('/')[-1] \
+            vf_name = os.path.basename(self.video_path) \
                 .replace('.mp4', '')
-            # vf_name = ''
-            output_path = temp_dir + '\\' + vf_name + "_merged_audio.mp4"
+            # output_path = os.path.abspath(os.path.join(SETTINGS.get('TEMP_DIR'), vf_name + '.aac'))
+            output_path = os.path.abspath(os.path.join(SETTINGS.get('TEMP_DIR'), vf_name + '_merged_audio.mp4'))
+
             # print(output_path)
             # exit(0)
 
@@ -108,13 +117,17 @@ class VideoTrimmer(QWidget):
             if not os.path.exists(output_path):
                 print('file not opened before, generating audio...')
                 command = [
-                    "ffmpeg", "-i", self.video_path,
+                    FFMPEG, "-i", self.video_path,
                     "-filter_complex", "[0:a:0][0:a:1]amerge=inputs=2[a]",
+                    # "-map", "[a]",
+                    # "-c:a", "aac", "-b:a", "192k",
                     "-map", "0:v", "-map", "[a]",
                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
                     output_path, "-y"
                 ]
-                subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(command)
+            # self.video_path = self.original_path
             self.video_path = output_path
             # print(self.video_path)
 
@@ -136,6 +149,8 @@ class VideoTrimmer(QWidget):
             self.player.positionChanged.connect(self.on_playback_change)
             self.player.setSource(QUrl.fromLocalFile(self.video_path))
             self.player.play()
+
+            # print(self.player.mediaObject())
 
     def on_playback_change(self, value, isReal=True):
         # self.start_label.setText(f"Start Time: {value} sec")
@@ -188,16 +203,17 @@ class VideoTrimmer(QWidget):
             return  # Prevent invalid trim
 
         output_path = self.original_path.replace(".mp4", " - Trim.mp4")
-        output_path = output_dir + '\\' + output_path.split('/')[-1]
+        output_path = os.path.join(SETTINGS.get('OUTPUT_DIR'), output_path.split('/')[-1])
+        # output_path = SETTINGS.get('OUTPUT_DIR') + '\\' + output_path.split('/')[-1]
 
         duration = end_time - start_time
-        bitrate = (FILE_SIZE * 0.87 * 1024 * 1024 * 8) // duration
+        bitrate = (SETTINGS.get('FILE_SIZE') * 0.87 * 1024 * 1024 * 8) // duration
         # print(bitrate)
 
         self.player.pause()
 
         command = [
-            "ffmpeg", "-y",
+            FFMPEG, "-y",
             "-i", self.video_path,
             "-ss", str(start_time), "-to", str(end_time),
             "-b:v", str(bitrate),
@@ -209,6 +225,42 @@ class VideoTrimmer(QWidget):
         self.player.play()
 
 if __name__ == "__main__":
+    # verify required folders and files exist
+
+    # settings file
+    if not os.path.exists(SETTINGS_DIR):
+        # first time set up
+
+        # create the default dirs
+        if not os.path.exists(SETTINGS.get('INPUT_DIR')):
+            os.mkdir(SETTINGS.get('INPUT_DIR'))
+
+        if not os.path.exists(SETTINGS.get('OUTPUT_DIR')):
+            os.mkdir(SETTINGS.get('OUTPUT_DIR'))
+
+        if not os.path.exists(SETTINGS.get('TEMP_DIR')):
+            os.mkdir(SETTINGS.get('TEMP_DIR'))
+
+        # create the settings file
+        with open(SETTINGS_DIR, mode='w') as f:
+            for s,v in SETTINGS.items():
+                f.write(f'{s}={v}\n')
+    else:
+        # read settings
+        with open(SETTINGS_DIR, mode='r') as f:
+            for l in f.readlines():
+                try:
+                    key,val = l.strip().split('=')
+                    try:
+                        val = int(val)
+                    except:
+                        pass
+
+                    SETTINGS[key] = val
+                except:
+                    print(f'error reading settings line: {l.strip()}')
+
+
     app = QApplication(sys.argv)
     window = VideoTrimmer()
     window.show()
