@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtCore import Qt, QTimer, QUrl
+import re
 
 # constants
 SETTINGS = {
@@ -102,24 +103,38 @@ class VideoTrimmer(QWidget):
 
     def load_video(self):
         file_dialog = QFileDialog()
-        self.video_path, _ = file_dialog.getOpenFileName(self, "Select Video", SETTINGS.get('INPUT_DIR'), "Videos (*.mp4 *.avi *.mov)")
-        self.original_path = self.video_path
+        vid_path, _ = file_dialog.getOpenFileName(self, "Select Video", SETTINGS.get('INPUT_DIR'), "Videos (*.mp4 *.avi *.mov *.*)")
 
-        if self.video_path:
-            vf_name = os.path.basename(self.video_path) \
-                .replace('.mp4', '')
+        if vid_path:
+            self.video_path = vid_path
+            self.original_path = self.video_path
+            self.video_extension = os.path.basename(self.video_path).split('.')[-1]
+            vf_name = '.'.join(os.path.basename(self.video_path).split('.')[:-1])
+            self.video_name = vf_name
             # output_path = os.path.abspath(os.path.join(SETTINGS.get('TEMP_DIR'), vf_name + '.aac'))
-            output_path = os.path.abspath(os.path.join(SETTINGS.get('TEMP_DIR'), vf_name + '_merged_audio.mp4'))
+            output_path = os.path.abspath(os.path.join(SETTINGS.get('TEMP_DIR'), vf_name + f'_merged_audio.{self.video_extension}'))
 
             # print(output_path)
             # exit(0)
 
+            probe = subprocess.run([
+                FFMPEG, "-i", self.video_path
+            ], stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            # num_audio_tracks = len(re.findall(r'Stream #0:\d+: Audio:', probe.stderr))
+            num_audio_tracks = len(re.findall(r'Stream #0:\d+(?:\([^\)]*\))?: Audio:', probe.stderr))
+            inputs = ''.join(f'[0:a:{i}]' for i in range(num_audio_tracks))
+
+            self.n_audio_tracks = num_audio_tracks
+            self.audio_input_str = inputs
+
             # Merge audio tracks using FFmpeg
             if not os.path.exists(output_path):
                 print('file not opened before, generating audio...')
+
                 command = [
                     FFMPEG, "-i", self.video_path,
-                    "-filter_complex", "[0:a:0][0:a:1]amerge=inputs=2[a]",
+                    # "-filter_complex", "[0:a:0][0:a:1]amerge=inputs=2[a]",
+                    "-filter_complex", f"{inputs}amix=inputs={num_audio_tracks}:duration=longest[a]",
                     # "-map", "[a]",
                     # "-c:a", "aac", "-b:a", "192k",
                     # "-map", "0:v",
@@ -216,7 +231,8 @@ class VideoTrimmer(QWidget):
         if start_time >= end_time:
             return  # Prevent invalid trim
 
-        output_path = self.original_path.replace(".mp4", " - Trim.mp4")
+        # output_path = self.original_path.replace(".mp4", " - Trim.mp4")
+        output_path = self.video_name + f' - Trim.{self.video_extension}'
         output_path = os.path.join(SETTINGS.get('OUTPUT_DIR'), output_path.split('/')[-1])
         # output_path = SETTINGS.get('OUTPUT_DIR') + '\\' + output_path.split('/')[-1]
 
@@ -230,7 +246,8 @@ class VideoTrimmer(QWidget):
             FFMPEG, "-y",
             "-i", self.original_path,
             "-ss", str(start_time), "-to", str(end_time),
-            "-filter_complex", "[0:a:0][0:a:1]amerge=inputs=2[a]",
+            # "-filter_complex", "[0:a:0][0:a:1]amerge=inputs=2[a]",
+            "-filter_complex", f"{self.audio_input_str}amix=inputs={self.n_audio_tracks}:duration=longest[a]",
             "-ac", "2",
             "-map", "[a]",
             "-map", "0:v:0",
